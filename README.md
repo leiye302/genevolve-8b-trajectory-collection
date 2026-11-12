@@ -9,7 +9,7 @@
 ## 对齐的是哪一份实现
 
 - 工具循环、系统提示、历史拼接、工具反馈、最后一步提示：直接调用 [GenEvolve 作者公开实现 `23c847c`](https://github.com/MeiGen-AI/GenEvolve/tree/23c847c559ccc0f95bbf4b3d8925898463822f4c)。**没有复制后自行改写循环**。
-- 采样、token budget、tokenizer 与模型调用：直接调用 [GenEvolve-2B-Reproduction `0c35d1a`](https://github.com/leiye302/GenEvolve-2B-Reproduction/tree/0c35d1a8cce551887b9afb608afa35ca755e7104) 的 `genevolve_repro.policy.make_agent`。它支持同架构的 8B 权重；本仓库检查 8B 配置并使用已有 SFT 模型。
+- 采样、token budget、tokenizer 与模型调用：直接调用 [GenEvolve-2B-Reproduction `57263f0`](https://github.com/leiye302/GenEvolve-2B-Reproduction/tree/57263f0583c633c3d515913b9935c3850cdf798e) 的 `genevolve_repro.policy.make_agent`。它支持同架构的 8B 权重；本仓库检查 8B 配置并使用已有 SFT 模型。
 - 这是与上述**公开复现代码**对齐的采集器，不声称作者未发布的完整 RL 代码已经被复现。所有依赖版本见 [sources.json](sources.json)。不依赖发布者的电脑、服务器或私有目录。
 
 ### Actor 实际看到什么
@@ -24,7 +24,7 @@ Actor 的输入全是文字：原始请求、过去的 assistant 输出、工具
 <think>reasoning</think><answer>{...}</answer>
 ```
 
-本轮普通 SFT 断点采集不增加词表、不插入 `<RETHINK>`、不强制触发。如果已有 tokenizer 把 `<RETHINK>` 注册成特殊 token，则仅在解码时保留它；上游解析器仍按原生 `tool_call` / `answer` 工作。其余特殊 token 的处理与训练入口一致。
+本轮普通 SFT 断点采集不增加词表、不插入 `<RETHINK>`、不强制触发。采集、训练 rollout 和评测直接共用固定版本里的 `genevolve_repro.actor_text.decode_actor_response`，不再由采集器单独包装 tokenizer。如果已有 tokenizer 把 `<RETHINK>` 注册成特殊 token，则解码、动作解析前的文本和后续历史都保留它，其余特殊控制 token 仍按原规则清理；上游解析器仍按原生 `tool_call` / `answer` 工作。原始生成 token ID 完整保留，不因文本清理改变训练目标；无 marker 的输出保持原解码行为。采集合同记录 `actor_text_protocol`，升级后不得和旧代码采出的记录混跑，应使用新的工作目录。
 
 **重要例外：**作者的第 11 轮提示明确要求不写 `think`、直接回答。我们原样保留，并记录 `forced_final_step=true`。这些轮次不计入“普通轮 reasoning 保留率”，也不导出为 reasoning 路由审核候选。不能把这种有意设置的省略当成模型退化。
 

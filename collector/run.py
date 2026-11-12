@@ -41,6 +41,7 @@ def establish_contract(work, checkpoint, devices):
     # Its hash still prevents a backend change on resume.
     backend = os.environ.get("SERPER_BASE_URL", "https://google.serper.dev").rstrip("/")
     from genevolve.system_prompt import SYSTEM_PROMPT, FINAL_STEP_MESSAGE
+    from genevolve_repro.actor_text import ACTOR_TEXT_PROTOCOL
     value = {
         "schema": 1, "sources": sources(), "code": code_fingerprint(), "config": cfg,
         "sampling": sampling, "checkpoint_sha256": checkpoint_fingerprint(checkpoint),
@@ -49,6 +50,7 @@ def establish_contract(work, checkpoint, devices):
         "serper_endpoint_sha256": digest(backend), "devices": devices,
         "runtime": runtime,
         "actor": "existing_qwen3_vl_8b_sft", "images_in_actor_input": False,
+        "actor_text_protocol": ACTOR_TEXT_PROTOCOL,
     }
     bind_json(work / "contract.json", value)
     return value
@@ -57,7 +59,7 @@ def establish_contract(work, checkpoint, devices):
 def worker(work, checkpoint, device, rank, world, phase, retry_errors):
     import torch
     from transformers import AutoTokenizer
-    from .observe import MarkerTokenizer, ToolObserver, collect_one
+    from .observe import ToolObserver, collect_one
 
     check_sources()
     from genevolve_repro.distributed import load_model
@@ -92,7 +94,7 @@ def worker(work, checkpoint, device, rank, world, phase, retry_errors):
         raise RuntimeError("Use a BF16-capable GPU; precision is not silently changed.")
     model = load_model(checkpoint, torch.bfloat16, attention=cfg["attention"]).to(device).eval()
     model.requires_grad_(False)
-    tokenizer = MarkerTokenizer(AutoTokenizer.from_pretrained(checkpoint, use_fast=True))
+    tokenizer = AutoTokenizer.from_pretrained(checkpoint, use_fast=True)
     observer = ToolObserver(work / "images")
     agent = make_agent(model, tokenizer, torch.device(device), contract["sampling"],
                        text_search_tool=observer.text, image_search_tool=observer.images)

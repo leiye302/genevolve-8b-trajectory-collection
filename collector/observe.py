@@ -12,26 +12,6 @@ THINK = re.compile(r"<think>(.*?)</think>", re.DOTALL)
 SUFFIX = re.compile(r"<(tool_call|answer)>.*?</\1>", re.DOTALL)
 
 
-class MarkerTokenizer:
-    """Preserve an already registered marker without changing the vocabulary."""
-    def __init__(self, tokenizer):
-        self.wrapped = tokenizer
-        self.marker = tokenizer.get_vocab().get("<RETHINK>")
-
-    def __getattr__(self, name):
-        return getattr(self.wrapped, name)
-
-    def __call__(self, *args, **kwargs):
-        return self.wrapped(*args, **kwargs)
-
-    def decode(self, ids, **kwargs):
-        if kwargs.get("skip_special_tokens") and self.marker is not None and self.marker in ids:
-            special = set(self.wrapped.all_special_ids) - {self.marker}
-            ids = [i for i in ids if i not in special]
-            kwargs = {**kwargs, "skip_special_tokens": False}
-        return self.wrapped.decode(ids, **kwargs)
-
-
 def image_info(path, work):
     p = Path(path)
     info = {"original_path": str(p), "relative_path": None, "decodable": False}
@@ -93,13 +73,14 @@ class ToolObserver:
 
 def decision(turn, tokenizer, index):
     from genevolve.agent import _parse_answer, _parse_tool_call
+    from genevolve_repro.actor_text import decode_actor_response
     from genevolve_repro.policy import tokenize_history
     from genevolve.system_prompt import FINAL_STEP_MESSAGE
 
     messages = copy.deepcopy(turn.messages)
     text_only = all(isinstance(m.get("content"), str) for m in messages)
     raw = tokenizer.decode(turn.tokens, skip_special_tokens=False, clean_up_tokenization_spaces=False)
-    response = tokenizer.decode(turn.tokens, skip_special_tokens=True).strip()
+    response = decode_actor_response(tokenizer, turn.tokens)
     think = THINK.search(response)
     blocks = list(SUFFIX.finditer(response))
     final = bool(messages and messages[-1].get("content") == FINAL_STEP_MESSAGE)

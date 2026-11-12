@@ -15,7 +15,7 @@ from collector.audit import audit, require_pilot, summarize
 from collector.common import (ROOT, atomic_json, bind_json, check_sources, checkpoint_fingerprint,
                               digest, jsonl, read_json, recipe)
 from collector.export import export
-from collector.observe import MarkerTokenizer, ToolObserver, collect_one, decision, image_info
+from collector.observe import ToolObserver, collect_one, decision, image_info
 from collector.prepare import build_plan
 
 
@@ -28,10 +28,17 @@ class CharacterTokenizer:
         return {"<RETHINK>": 999}
 
     def apply_chat_template(self, messages, **_):
-        return list(map(ord, "\n".join(m["role"] + ": " + m["content"] for m in messages) + "\nassistant:"))
+        return self("\n".join(m["role"] + ": " + m["content"] for m in messages) + "\nassistant:")["input_ids"]
 
     def __call__(self, text, **_):
-        return {"input_ids": list(map(ord, text)), "offset_mapping": [(i, i + 1) for i in range(len(text))]}
+        ids, offsets, pos = [], [], 0
+        while pos < len(text):
+            marker = text.startswith("<RETHINK>", pos)
+            end = pos + (len("<RETHINK>") if marker else 1)
+            ids.append(999 if marker else ord(text[pos]))
+            offsets.append((pos, end))
+            pos = end
+        return {"input_ids": ids, "offset_mapping": offsets}
 
     def decode(self, ids, skip_special_tokens=False, **_):
         parts = []
@@ -49,7 +56,8 @@ class ScriptedModel:
 
     def generate(self, input_ids, **kwargs):
         self.calls.append({"input_ids": input_ids.tolist(), **kwargs})
-        return torch.cat((input_ids, torch.tensor([list(map(ord, next(self.responses)))])), dim=1)
+        tokens = CharacterTokenizer()(next(self.responses))["input_ids"]
+        return torch.cat((input_ids, torch.tensor([tokens])), dim=1)
 
 
 def response_json(value):
@@ -67,7 +75,7 @@ class CollectionTests(unittest.TestCase):
         self.addCleanup(t.cleanup)
         self.work = Path(t.name)
         self.cfg = read_json(ROOT / "configs" / "collection.json")
-        self.tokenizer = MarkerTokenizer(CharacterTokenizer())
+        self.tokenizer = CharacterTokenizer()
         self.task = {"index": 0, "id": "trajectory_00000", "seed": 42, "source_id": "train_1",
                      "prompt": "Draw a gold bird.", "category": "animals"}
 
@@ -163,9 +171,38 @@ class CollectionTests(unittest.TestCase):
             self.assertEqual(original.tokens, captured["response_ids"])
 
     def test_marker_supported_without_inserting_or_registering_tokens(self):
-        self.assertEqual(self.tokenizer.decode([ord("a"), 999, 2], skip_special_tokens=True), "a<RETHINK>")
-        self.assertEqual(self.tokenizer.decode([ord("a"), 2], skip_special_tokens=True), "a")
+        from genevolve_repro.actor_text import decode_actor_response
+        self.assertEqual(decode_actor_response(self.tokenizer, [ord("a"), 999, 2]), "a<RETHINK>")
+        self.assertEqual(decode_actor_response(self.tokenizer, [ord("a"), 2]), "a")
         self.assertEqual(self.tokenizer.get_vocab(), {"<RETHINK>": 999})
+
+    def test_special_marker_matches_training_and_survives_next_turn(self):
+        from genevolve_repro.policy import make_agent
+        responses = [
+            '<think>Need a bird reference.</think><RETHINK><tool_call>{"name":"image_search","arguments":{"query":"bird"}}</tool_call>\x02',
+            '<think>Use the reference.</think><answer>{"gen_prompt":"Draw a gold bird.","reference_images":[{"img_id":"IMG_001"}]}</answer>\x02',
+        ]
+        row, _ = self.collect(responses=responses)
+        self.assertTrue(row["program_valid"])
+        first, second = row["decisions"]
+        self.assertIn("</think><RETHINK><tool_call>", first["actor_response"])
+        self.assertNotIn("\x02", first["actor_response"])
+        self.assertEqual(first["response_ids"], self.tokenizer(responses[0])["input_ids"])
+        self.assertEqual(first["response_ids"][-1], 2)
+        self.assertIn(999, first["response_ids"])
+        self.assertEqual(second["messages"][2]["content"], first["actor_response"])
+        self.assertIn(999, second["prefix_ids"])
+        self.assertTrue(first["contains_rethink"])
+        refs = row["tool_events"][-1]["refs"]
+        agent = make_agent(ScriptedModel(responses), self.tokenizer, "cpu",
+                           {**recipe(), "max_initial_tokens": 20000},
+                           image_search_tool=SimpleNamespace(call=lambda **_: refs))
+        self.addCleanup(agent._client.close)
+        trajectory = agent.collect(self.task["prompt"])
+        for original, captured in zip(trajectory.turns, row["decisions"]):
+            self.assertEqual(original.messages, captured["messages"])
+            self.assertEqual(original.prefix, captured["prefix_ids"])
+            self.assertEqual(original.tokens, captured["response_ids"])
 
     def test_model_error_preserves_collected_prefix_evidence(self):
         row, _ = self.collect(responses=['<think>Use a reference.</think><tool_call>{"name":"image_search","arguments":{"query":"bird"}}</tool_call>'])

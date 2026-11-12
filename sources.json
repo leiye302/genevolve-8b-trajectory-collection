@@ -1,7 +1,7 @@
 {
   "method": {
     "repo": "https://github.com/leiye302/GenEvolve-2B-Reproduction.git",
-    "revision": "0c35d1a8cce551887b9afb608afa35ca755e7104"
+    "revision": "57263f0583c633c3d515913b9935c3850cdf798e"
   },
   "agent": {
     "repo": "https://github.com/MeiGen-AI/GenEvolve.git",
