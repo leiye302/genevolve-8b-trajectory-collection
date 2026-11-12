@@ -1,0 +1,18 @@
+{
+  "total": 1000,
+  "pilot": 50,
+  "seed": 42,
+  "actor_observation": "text_only",
+  "action_protocol": "native_tool_call_or_answer",
+  "sampling_source": "pinned_method_rl",
+  "attention": "flash_attention_2",
+  "min_free_gib": 10,
+  "pilot_gate": {
+    "min_image_search_episode_fraction": 0.8,
+    "min_image_call_download_fraction": 0.8,
+    "min_decodable_download_fraction": 0.95,
+    "min_valid_program_fraction": 0.8,
+    "min_protocol_fraction": 0.95,
+    "min_nonfinal_reasoning_fraction": 0.9
+  }
+}

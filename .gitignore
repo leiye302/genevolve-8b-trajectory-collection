@@ -1,0 +1,14 @@
+.deps/
+.venv*/
+__pycache__/
+*.pyc
+.env
+.env.*
+!services.env.example
+runs/
+checkpoints/
+*.safetensors
+*.pt
+*.bin
+*.log
+.setup.lock
